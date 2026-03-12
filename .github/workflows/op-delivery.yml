@@ -59,8 +59,9 @@ on:
         default: 'ci@meaningfy.ws'
         type: string
       citnet_repo_url:
-        description: 'SSH URL of the CITnet Bitbucket repo'
-        required: true
+        description: 'SSH URL of the CITnet Bitbucket repo (not required for dry_run)'
+        required: false
+        default: ''
         type: string
     secrets:
       CITNET_DEPLOY_KEY:

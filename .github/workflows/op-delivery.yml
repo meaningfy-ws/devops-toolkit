@@ -1,0 +1,251 @@
+# Reusable workflow: Deliver source code to OP CITnet Bitbucket
+#
+# Copies a directory from a Meaningfy GitHub repo to CITnet Bitbucket's
+# develop branch, validates the OP-mandatory structure (src/, test/, docs/).
+#
+# Per OP CI/CD Pipeline Definition (section 5.4), developers only have
+# write access to the develop branch. Release branches, tags, and main
+# are managed by OPS.
+#
+# Devs are responsible for OP-compliant naming and directory layout.
+
+name: OP Delivery
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: 'Git ref to checkout from the source repo (e.g., develop, main, release/2.3.0-RC.5)'
+        required: true
+        type: string
+      deliverable_path:
+        description: 'Directory to extract as CITnet repo root'
+        required: false
+        default: '.'
+        type: string
+      version_file:
+        description: 'Path to VERSION file in the source repo'
+        required: false
+        default: 'VERSION'
+        type: string
+      extra_files:
+        description: 'Space-separated list of extra files to copy to deliverable root'
+        required: false
+        default: ''
+        type: string
+      fortify_exclusions:
+        description: 'Fortify security scan exclusion patterns (one per line, creates src/filters/fortify-exclusion.properties)'
+        required: false
+        default: ''
+        type: string
+      odc_exclusions:
+        description: 'OWASP Dependency Check exclusion patterns (one per line, creates src/filters/odc-exclusion.properties)'
+        required: false
+        default: ''
+        type: string
+      dry_run:
+        description: 'Prepare and validate the deliverable but do not push to CITnet'
+        required: false
+        default: false
+        type: boolean
+      git_author_name:
+        description: 'Git commit author name for CITnet commits'
+        required: false
+        default: 'Meaningfy CI'
+        type: string
+      git_author_email:
+        description: 'Git commit author email for CITnet commits'
+        required: false
+        default: 'ci@meaningfy.ws'
+        type: string
+      citnet_repo_url:
+        description: 'SSH URL of the CITnet Bitbucket repo'
+        required: true
+        type: string
+    secrets:
+      CITNET_DEPLOY_KEY:
+        description: 'SSH private key for pushing to CITnet'
+        required: true
+
+jobs:
+  deliver:
+    name: Deliver to CITnet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Checkout source repo ──────────────────────────────────────
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+          path: source
+
+      # ── 2. Read version ──────────────────────────────────────────────
+      - name: Read version
+        id: version
+        run: |
+          VERSION_PATH="source/${{ inputs.version_file }}"
+
+          if [ ! -f "$VERSION_PATH" ]; then
+            echo "::error::VERSION file not found at $VERSION_PATH"
+            exit 1
+          fi
+
+          VERSION=$(cat "$VERSION_PATH" | tr -d '[:space:]')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      # ── 3. Prepare deliverable tree ──────────────────────────────────
+      - name: Prepare deliverable tree
+        run: |
+          SOURCE_DIR="source/${{ inputs.deliverable_path }}"
+
+          if [ ! -d "$SOURCE_DIR" ]; then
+            echo "::error::Deliverable path not found: $SOURCE_DIR"
+            exit 1
+          fi
+
+          mkdir -p deliverable
+
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            "$SOURCE_DIR/" deliverable/
+
+          # Copy extra files to deliverable root (if specified)
+          EXTRA_FILES="${{ inputs.extra_files }}"
+          if [ -n "$EXTRA_FILES" ]; then
+            for f in $EXTRA_FILES; do
+              if [ -f "source/$f" ]; then
+                cp "source/$f" "deliverable/"
+                echo "Copied extra file: $f"
+              else
+                echo "::warning::Extra file not found: source/$f"
+              fi
+            done
+          fi
+
+          # Ensure VERSION ends up at src/VERSION (OP requirement 5.2.3)
+          mkdir -p deliverable/src
+          cp "source/${{ inputs.version_file }}" deliverable/src/VERSION
+          echo "src/VERSION: $(cat deliverable/src/VERSION)"
+
+          # Generate security exclusion files if patterns provided (OP requirement 5.2.4)
+          # Inputs are newline-separated (one pattern per line), joined with commas for .properties format
+          FORTIFY_RAW="${{ inputs.fortify_exclusions }}"
+          ODC_RAW="${{ inputs.odc_exclusions }}"
+
+          # Strip blank lines and join with commas
+          FORTIFY=$(echo "$FORTIFY_RAW" | sed '/^\s*$/d' | paste -sd ',' -)
+          ODC=$(echo "$ODC_RAW" | sed '/^\s*$/d' | paste -sd ',' -)
+
+          if [ -n "$FORTIFY" ] || [ -n "$ODC" ]; then
+            mkdir -p deliverable/src/filters
+          fi
+
+          if [ -n "$FORTIFY" ]; then
+            echo "excludePatterns=$FORTIFY" > deliverable/src/filters/fortify-exclusion.properties
+            echo "Generated src/filters/fortify-exclusion.properties"
+          fi
+
+          if [ -n "$ODC" ]; then
+            echo "excludePatterns=$ODC" > deliverable/src/filters/odc-exclusion.properties
+            echo "Generated src/filters/odc-exclusion.properties"
+          fi
+
+      # ── 4. Validate mandatory structure ──────────────────────────────
+      - name: Validate OP directory structure
+        run: |
+          FAIL=0
+          for dir in src test docs; do
+            if [ ! -d "deliverable/$dir" ]; then
+              echo "::error::Mandatory directory missing: $dir/"
+              FAIL=1
+            else
+              echo "OK: $dir/"
+            fi
+          done
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "The OP CI/CD pipeline requires src/, test/, and docs/ directories."
+            find deliverable -maxdepth 2 -type d | sort
+            exit 1
+          fi
+
+      # ── 5. Upload deliverable artifact (dry run) ─────────────────────
+      - name: Upload deliverable artifact
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: op-deliverable-${{ steps.version.outputs.version }}
+          path: deliverable/
+          retention-days: 7
+
+      # ── 6. Set up SSH for CITnet ─────────────────────────────────────
+      - name: Set up SSH
+        if: ${{ !inputs.dry_run }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.CITNET_DEPLOY_KEY }}" > ~/.ssh/citnet_key
+          chmod 600 ~/.ssh/citnet_key
+
+          CITNET_URL="${{ inputs.citnet_repo_url }}"
+          CITNET_HOST=$(echo "$CITNET_URL" | sed -n 's|.*[/@]\([^:/]*\).*|\1|p')
+          CITNET_PORT=$(echo "$CITNET_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+
+          if [ -n "$CITNET_PORT" ] && [ "$CITNET_PORT" != "443" ]; then
+            ssh-keyscan -p "$CITNET_PORT" "$CITNET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          else
+            ssh-keyscan "$CITNET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/citnet_key -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+
+      # ── 7. Clone CITnet develop branch ───────────────────────────────
+      - name: Clone CITnet repo
+        if: ${{ !inputs.dry_run }}
+        run: |
+          CITNET_URL="${{ inputs.citnet_repo_url }}"
+
+          git clone --depth 1 --branch develop "$CITNET_URL" citnet
+
+          cd citnet
+          git config user.name "${{ inputs.git_author_name }}"
+          git config user.email "${{ inputs.git_author_email }}"
+
+      # ── 8. Sync deliverable and push to develop ──────────────────────
+      - name: Sync and push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          rsync -a --delete \
+            --exclude '.git' \
+            deliverable/ citnet/
+
+          cd citnet
+
+          if git diff --quiet HEAD 2>/dev/null && \
+             git diff --cached --quiet 2>/dev/null && \
+             [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "No changes to deliver"
+            exit 0
+          fi
+
+          VERSION="${{ steps.version.outputs.version }}"
+
+          git add -A
+          git commit -m "delivery: $VERSION"
+          git push origin develop
+
+      # ── 9. Summary ──────────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## OP Delivery Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Source ref | \`${{ inputs.source_ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry run | \`${{ inputs.dry_run }}\` |" >> "$GITHUB_STEP_SUMMARY"

@@ -14,12 +14,16 @@ name: OP Delivery
 on:
   workflow_call:
     inputs:
+      project_name:
+        description: 'Project name for artifact naming and logs (e.g., ted-rdf-conversion-pipeline)'
+        required: true
+        type: string
       source_ref:
         description: 'Git ref to checkout from the source repo (e.g., develop, main, release/2.3.0-RC.5)'
         required: true
         type: string
       deliverable_path:
-        description: 'Directory to extract as CITnet repo root'
+        description: 'Root directory containing src/, test/, docs/ in the source repo'
         required: false
         default: '.'
         type: string
@@ -28,8 +32,8 @@ on:
         required: false
         default: 'VERSION'
         type: string
-      extra_files:
-        description: 'Space-separated list of extra files to copy to deliverable root'
+      include_extra_paths:
+        description: 'Additional paths to include in the deliverable (one per line, relative to deliverable_path)'
         required: false
         default: ''
         type: string
@@ -110,20 +114,30 @@ jobs:
 
           mkdir -p deliverable
 
-          rsync -a \
-            --exclude '.git' \
-            --exclude '.github' \
-            "$SOURCE_DIR/" deliverable/
+          # Copy only the three mandatory directories
+          for dir in src test docs; do
+            if [ -d "$SOURCE_DIR/$dir" ]; then
+              rsync -a "$SOURCE_DIR/$dir/" "deliverable/$dir/"
+              echo "Copied: $dir/"
+            else
+              echo "::warning::Mandatory directory not found in source: $dir/"
+            fi
+          done
 
-          # Copy extra files to deliverable root (if specified)
-          EXTRA_FILES="${{ inputs.extra_files }}"
-          if [ -n "$EXTRA_FILES" ]; then
-            for f in $EXTRA_FILES; do
-              if [ -f "source/$f" ]; then
-                cp "source/$f" "deliverable/"
-                echo "Copied extra file: $f"
+          # Copy extra paths (one per line, files or directories)
+          EXTRA_PATHS_RAW="${{ inputs.include_extra_paths }}"
+          if [ -n "$EXTRA_PATHS_RAW" ]; then
+            echo "$EXTRA_PATHS_RAW" | sed '/^\s*$/d' | while read -r p; do
+              SRC="$SOURCE_DIR/$p"
+              if [ -d "$SRC" ]; then
+                rsync -a "$SRC/" "deliverable/$p/"
+                echo "Copied extra dir: $p/"
+              elif [ -f "$SRC" ]; then
+                mkdir -p "deliverable/$(dirname "$p")"
+                cp "$SRC" "deliverable/$p"
+                echo "Copied extra file: $p"
               else
-                echo "::warning::Extra file not found: source/$f"
+                echo "::warning::Extra path not found: $p"
               fi
             done
           fi
@@ -180,7 +194,7 @@ jobs:
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v7
         with:
-          name: op-deliverable-${{ steps.version.outputs.version }}
+          name: op-deliverable-${{ inputs.project_name }}-${{ steps.version.outputs.version }}
           path: deliverable/
           retention-days: 7
 
@@ -247,6 +261,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Project | \`${{ inputs.project_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Source ref | \`${{ inputs.source_ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Dry run | \`${{ inputs.dry_run }}\` |" >> "$GITHUB_STEP_SUMMARY"

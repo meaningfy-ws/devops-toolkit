@@ -65,8 +65,8 @@ on:
         type: string
     secrets:
       CITNET_DEPLOY_KEY:
-        description: 'SSH private key for pushing to CITnet'
-        required: true
+        description: 'SSH private key for pushing to CITnet (not required for dry_run)'
+        required: false
 
 jobs:
   deliver:

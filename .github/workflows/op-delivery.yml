@@ -199,6 +199,7 @@ jobs:
 
       # ── 8. Sync deliverable and push ─────────────────────────────────
       - name: Sync and push
+        id: push
         if: ${{ !inputs.dry_run }}
         run: |
           rsync -a --delete \
@@ -211,8 +212,11 @@ jobs:
              git diff --cached --quiet 2>/dev/null && \
              [ -z "$(git ls-files --others --exclude-standard)" ]; then
             echo "No changes to deliver"
+            echo "outcome=no_changes" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          echo "outcome=pushed" >> "$GITHUB_OUTPUT"
 
           VERSION="${{ steps.version.outputs.version }}"
           CUSTOM_MSG="${{ inputs.commit_message }}"
@@ -257,11 +261,24 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          # Determine tag outcome
-          TAG_REQUESTED="${{ inputs.create_tag }}"
           DRY_RUN="${{ inputs.dry_run }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+          PUSH_OUTCOME="${{ steps.push.outputs.outcome }}"
+          TAG_REQUESTED="${{ inputs.create_tag }}"
           TAG_STEP_OUTCOME="${{ steps.tag.outputs.outcome }}"
 
+          # Determine delivery status banner
+          if [ "$DRY_RUN" = "true" ]; then
+            BANNER="Dry run — deliverable uploaded as artifact"
+          elif [ "$PUSH_OUTCOME" = "no_changes" ]; then
+            BANNER="No changes detected — nothing was pushed"
+          elif [ "$PUSH_OUTCOME" = "pushed" ]; then
+            BANNER="Delivered to $TARGET_BRANCH"
+          else
+            BANNER="Delivery did not complete"
+          fi
+
+          # Determine tag outcome
           if [ "$DRY_RUN" = "true" ] || [ "$TAG_REQUESTED" != "true" ]; then
             TAG_RESULT="Not requested"
           elif [ -n "$TAG_STEP_OUTCOME" ]; then
@@ -272,11 +289,13 @@ jobs:
 
           echo "## OP Delivery Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> $BANNER" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Project | \`${{ github.event.repository.name }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Source ref | \`${{ github.ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Target branch | \`${{ inputs.target_branch }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target branch | \`$TARGET_BRANCH\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Dry run | \`$DRY_RUN\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag | $TAG_RESULT |" >> "$GITHUB_STEP_SUMMARY"

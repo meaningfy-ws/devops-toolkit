@@ -63,7 +63,7 @@ on:
         default: 'ci@meaningfy.ws'
         type: string
       commit_message:
-        description: 'Git commit message for the CITnet delivery commit. The version is always appended as a prefix: "delivery: <version> — <your message>". If empty, just "delivery: <version>" is used.'
+        description: 'Commit body appended after the subject line "delivery: <version>". Supports multi-line text for detailed descriptions. If empty, only the subject line is used.'
         required: false
         default: ''
         type: string
@@ -255,14 +255,18 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           CUSTOM_MSG="${{ inputs.commit_message }}"
 
+          # Build commit message file to support multi-line body
+          MSGFILE=$(mktemp)
+          echo "delivery: $VERSION" > "$MSGFILE"
+
           if [ -n "$CUSTOM_MSG" ]; then
-            COMMIT_MSG="delivery: $VERSION — $CUSTOM_MSG"
-          else
-            COMMIT_MSG="delivery: $VERSION"
+            echo "" >> "$MSGFILE"
+            echo "$CUSTOM_MSG" >> "$MSGFILE"
           fi
 
           git add -A
-          git commit -m "$COMMIT_MSG"
+          git commit -F "$MSGFILE"
+          rm -f "$MSGFILE"
           git push origin develop
 
       # ── 9. Summary ──────────────────────────────────────────────────

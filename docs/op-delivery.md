@@ -108,15 +108,28 @@ Once verified:
 | `dry_run` | No | `false` | If true, uploads artifact instead of pushing |
 | `git_author_name` | No | `Meaningfy CI` | Git author name for CITnet commits |
 | `git_author_email` | No | `ci@meaningfy.ws` | Git author email for CITnet commits |
-| `commit_message` | No | `''` | Description appended to the delivery commit (see below) |
+| `commit_message` | No | `''` | Multi-line commit body appended after the subject line (see below) |
 | `citnet_repo_url` | No | `''` | SSH URL of the CITnet Bitbucket repo |
 
 ### Commit message
 
-The CITnet commit message always starts with `delivery: <version>`. If you provide `commit_message`, it is appended:
+The CITnet commit subject is always `delivery: <version>`. If you provide `commit_message`, it becomes the commit body (separated by a blank line), supporting multi-line descriptions:
+
+```yaml
+commit_message: |
+  - Fixed airflow Dockerfile base image
+  - Updated DAG retry config
+  - Added new mapping suite processor
+```
+
+This produces a git commit like:
 
 ```
-delivery: 2.3.0-RC.5 — Fix airflow Dockerfile base image, update DAG retry config
+delivery: 2.3.0-RC.5
+
+- Fixed airflow Dockerfile base image
+- Updated DAG retry config
+- Added new mapping suite processor
 ```
 
 If `commit_message` is empty, the commit is simply `delivery: 2.3.0-RC.5`.

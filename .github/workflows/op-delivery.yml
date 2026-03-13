@@ -237,6 +237,7 @@ jobs:
 
       # ── 9. Tag the delivery (optional) ────────────────────────────
       - name: Create tag
+        id: tag
         if: ${{ !inputs.dry_run && inputs.create_tag }}
         run: |
           cd target
@@ -244,16 +245,31 @@ jobs:
 
           if git ls-remote --tags origin "$VERSION" | grep -q .; then
             echo "::warning::Tag $VERSION already exists on the target repo — skipping"
+            echo "outcome=Skipped (already exists): $VERSION" >> "$GITHUB_OUTPUT"
           else
             git tag "$VERSION"
             git push origin "$VERSION"
             echo "Tagged: $VERSION"
+            echo "outcome=Created: $VERSION" >> "$GITHUB_OUTPUT"
           fi
 
       # ── 10. Summary ─────────────────────────────────────────────────
       - name: Summary
         if: always()
         run: |
+          # Determine tag outcome
+          TAG_REQUESTED="${{ inputs.create_tag }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+          TAG_STEP_OUTCOME="${{ steps.tag.outputs.outcome }}"
+
+          if [ "$DRY_RUN" = "true" ] || [ "$TAG_REQUESTED" != "true" ]; then
+            TAG_RESULT="Not requested"
+          elif [ -n "$TAG_STEP_OUTCOME" ]; then
+            TAG_RESULT="$TAG_STEP_OUTCOME"
+          else
+            TAG_RESULT="Failed"
+          fi
+
           echo "## OP Delivery Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
@@ -262,5 +278,5 @@ jobs:
           echo "| Source ref | \`${{ github.ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Target branch | \`${{ inputs.target_branch }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Dry run | \`${{ inputs.dry_run }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Tag created | \`${{ !inputs.dry_run && inputs.create_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry run | \`$DRY_RUN\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | $TAG_RESULT |" >> "$GITHUB_STEP_SUMMARY"

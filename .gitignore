@@ -1,2 +1,3 @@
-# Seed/planning document — internal only
-seed.md
+.env
+.DS_Store
+*.log

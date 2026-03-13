@@ -172,15 +172,8 @@ jobs:
           echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-          TARGET_URL="${{ inputs.target_repo_url }}"
-          TARGET_HOST=$(echo "$TARGET_URL" | sed -n 's|.*[/@]\([^:/]*\).*|\1|p')
-          TARGET_PORT=$(echo "$TARGET_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
-
-          if [ -n "$TARGET_PORT" ] && [ "$TARGET_PORT" != "443" ]; then
-            ssh-keyscan -p "$TARGET_PORT" "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-          else
-            ssh-keyscan "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-          fi
+          TARGET_HOST=$(echo "${{ inputs.target_repo_url }}" | sed -n 's|.*[/@]\([^:/]*\).*|\1|p')
+          ssh-keyscan "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
           echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
 

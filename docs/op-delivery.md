@@ -109,6 +109,7 @@ Once verified:
 | `git_author_name` | No | `Meaningfy CI` | Git author name for CITnet commits |
 | `git_author_email` | No | `ci@meaningfy.ws` | Git author email for CITnet commits |
 | `commit_message` | No | `''` | Multi-line commit body appended after the subject line (see below) |
+| `create_tag` | No | `false` | Create a git tag on the target repo using the VERSION value |
 | `citnet_repo_url` | No | `''` | SSH URL of the CITnet Bitbucket repo |
 
 ### Commit message

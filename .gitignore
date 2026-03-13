@@ -1,5 +1,7 @@
 # Reference documents (OP specs, PDFs) — not part of the deliverable
-docs/
+docs/*
+!docs/op-delivery.md
+!docs/manual-updates.md
 
 # Seed/planning document — internal only
 seed.md

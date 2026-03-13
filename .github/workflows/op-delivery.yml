@@ -1,12 +1,5 @@
-# Reusable workflow: Deliver source code to a target Git repository
-#
-# Copies src/, test/, docs/ from a Meaningfy GitHub repo to a target repo's
-# branch, validates the OP-mandatory structure, and optionally tags the delivery.
-#
-# Designed for the OP CI/CD pipeline but generic enough for any Git-to-Git
-# delivery where SSH deploy key authentication is used.
-#
-# Devs are responsible for OP-compliant naming and directory layout.
+# Deliver src/, test/, docs/ to a target Git repo via SSH.
+# See docs/op-delivery.md for full reference.
 
 name: OP Delivery
 
@@ -68,7 +61,8 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # ── 1. Checkout source repo ──────────────────────────────────────
+      # ### Checkout
+      # Fetch the calling repo at the triggering ref.
       - name: Checkout source
         uses: actions/checkout@v6
         with:
@@ -76,7 +70,8 @@ jobs:
           fetch-depth: 1
           path: source
 
-      # ── 2. Read version ──────────────────────────────────────────────
+      # ### Version
+      # Read and export the VERSION file from repo root.
       - name: Read version
         id: version
         run: |
@@ -91,12 +86,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
-      # ── 3. Prepare deliverable tree ──────────────────────────────────
+      # ### Prepare
+      # Copy src/, test/, docs/, place VERSION, generate exclusion files.
       - name: Prepare deliverable tree
         run: |
           mkdir -p deliverable
 
-          # Copy only the three mandatory directories
           for dir in src test docs; do
             if [ -d "source/$dir" ]; then
               rsync -a "source/$dir/" "deliverable/$dir/"
@@ -106,17 +101,14 @@ jobs:
             fi
           done
 
-          # Ensure VERSION ends up at src/VERSION (OP requirement 5.2.3)
           mkdir -p deliverable/src
           cp source/VERSION deliverable/src/VERSION
           echo "src/VERSION: $(cat deliverable/src/VERSION)"
 
-          # Generate security exclusion files if patterns provided (OP requirement 5.2.4)
-          # Inputs are newline-separated (one pattern per line), joined with commas for .properties format
           FORTIFY_RAW="${{ inputs.fortify_exclude_patterns }}"
           ODC_RAW="${{ inputs.odc_exclude_patterns }}"
 
-          # Strip blank lines and join with commas
+          # Newline-separated patterns -> comma-separated .properties format
           FORTIFY=$(echo "$FORTIFY_RAW" | sed '/^\s*$/d' | paste -sd ',' -)
           ODC=$(echo "$ODC_RAW" | sed '/^\s*$/d' | paste -sd ',' -)
 
@@ -134,7 +126,8 @@ jobs:
             echo "Generated src/filters/odc-exclusion.properties"
           fi
 
-      # ── 4. Validate mandatory structure ──────────────────────────────
+      # ### Validate
+      # Fail if src/, test/, or docs/ are missing from the deliverable.
       - name: Validate OP directory structure
         run: |
           FAIL=0
@@ -153,7 +146,8 @@ jobs:
             exit 1
           fi
 
-      # ── 5. Upload deliverable artifact (dry run) ─────────────────────
+      # ### Artifact upload (dry run)
+      # Upload the deliverable for inspection without pushing.
       - name: Upload deliverable artifact
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v7
@@ -162,7 +156,8 @@ jobs:
           path: deliverable/
           retention-days: 7
 
-      # ── 6. Set up SSH ────────────────────────────────────────────────
+      # ### SSH setup
+      # Install deploy key and scan target host.
       - name: Set up SSH
         if: ${{ !inputs.dry_run }}
         run: |
@@ -175,7 +170,8 @@ jobs:
 
           echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
 
-      # ── 7. Clone target branch ───────────────────────────────────────
+      # ### Clone target
+      # Shallow-clone the target branch and configure git author.
       - name: Clone target repo
         if: ${{ !inputs.dry_run }}
         run: |
@@ -188,7 +184,8 @@ jobs:
           git config user.name "${{ inputs.commit_author_name }}"
           git config user.email "${{ inputs.commit_author_email }}"
 
-      # ── 8. Sync deliverable and push ─────────────────────────────────
+      # ### Sync and push
+      # Rsync deliverable over target (--delete), commit, and push.
       - name: Sync and push
         id: push
         if: ${{ !inputs.dry_run }}
@@ -212,9 +209,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           CUSTOM_MSG="${{ inputs.commit_message }}"
 
-          # Build commit message file to support multi-line body
-          # Pipe characters (|) are expanded to newlines so workflow_dispatch
-          # UI users can enter "line1 | line2 | line3" in a single text box.
+          # Pipe (|) chars expanded to newlines for workflow_dispatch UI input
           MSGFILE=$(mktemp)
           echo "delivery: $VERSION" > "$MSGFILE"
 
@@ -230,7 +225,8 @@ jobs:
           rm -f "$MSGFILE"
           git push origin "$TARGET_BRANCH"
 
-      # ── 9. Tag the delivery (optional) ────────────────────────────
+      # ### Tag (optional)
+      # Create a version tag on the target; skip if it already exists.
       - name: Create tag
         id: tag
         if: ${{ !inputs.dry_run && inputs.create_tag }}
@@ -248,7 +244,8 @@ jobs:
             echo "outcome=Created: $VERSION" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── 10. Summary ─────────────────────────────────────────────────
+      # ### Summary
+      # Write delivery status and metadata to the GitHub Actions summary.
       - name: Summary
         if: always()
         run: |

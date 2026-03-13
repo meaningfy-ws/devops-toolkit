@@ -29,9 +29,12 @@ jobs:
   deliver:
     uses: meaningfy-ws/devops-toolkit/.github/workflows/op-delivery.yml@main
     with:
+      target_repo_url: git@bitbucket.org:your-org/your-repo.git
+      commit_author_name: Your Name
+      commit_author_email: plumber@meaningfy.ws
       dry_run: true
     secrets:
-      SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+      SSH_DEPLOY_KEY: ${{ secrets.MY_DEPLOY_KEY }}
 ```
 
 See [docs/op-delivery.md](docs/op-delivery.md) for the full reference.

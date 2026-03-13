@@ -242,7 +242,7 @@ jobs:
           cd target
           VERSION="${{ steps.version.outputs.version }}"
 
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+          if git ls-remote --tags origin "$VERSION" | grep -q .; then
             echo "::warning::Tag $VERSION already exists on the target repo — skipping"
           else
             git tag "$VERSION"

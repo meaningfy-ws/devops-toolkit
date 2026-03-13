@@ -1,11 +1,10 @@
-# Reusable workflow: Deliver source code to OP CITnet Bitbucket
+# Reusable workflow: Deliver source code to a target Git repository
 #
-# Copies a directory from a Meaningfy GitHub repo to CITnet Bitbucket's
-# develop branch, validates the OP-mandatory structure (src/, test/, docs/).
+# Copies src/, test/, docs/ from a Meaningfy GitHub repo to a target repo's
+# branch, validates the OP-mandatory structure, and optionally tags the delivery.
 #
-# Per OP CI/CD Pipeline Definition (section 5.4), developers only have
-# write access to the develop branch. Release branches, tags, and main
-# are managed by OPS.
+# Designed for the OP CI/CD pipeline but generic enough for any Git-to-Git
+# delivery where SSH deploy key authentication is used.
 #
 # Devs are responsible for OP-compliant naming and directory layout.
 
@@ -14,77 +13,59 @@ name: OP Delivery
 on:
   workflow_call:
     inputs:
-      project_name:
-        description: 'Project name for artifact naming and logs (e.g., ted-rdf-conversion-pipeline)'
-        required: true
-        type: string
-      source_ref:
-        description: 'Git ref to checkout from the source repo (e.g., develop, main, release/2.3.0-RC.5)'
-        required: true
-        type: string
-      deliverable_path:
-        description: 'Root directory containing src/, test/, docs/ in the source repo'
-        required: false
-        default: '.'
-        type: string
-      version_file:
-        description: 'Path to VERSION file in the source repo'
-        required: false
-        default: 'VERSION'
-        type: string
-      include_extra_paths:
-        description: 'Additional paths to include in the deliverable (one per line, relative to deliverable_path)'
+      target_repo_url:
+        description: 'SSH URL of the target repository (e.g., git@bitbucket.org:project/repo.git). Not required for dry_run.'
         required: false
         default: ''
         type: string
-      fortify_exclusions:
-        description: 'Fortify security scan exclusion patterns (one per line, creates src/filters/fortify-exclusion.properties)'
+      target_branch:
+        description: 'Branch to push to on the target repository'
         required: false
-        default: ''
-        type: string
-      odc_exclusions:
-        description: 'OWASP Dependency Check exclusion patterns (one per line, creates src/filters/odc-exclusion.properties)'
-        required: false
-        default: ''
+        default: 'develop'
         type: string
       dry_run:
-        description: 'Prepare and validate the deliverable but do not push to CITnet'
+        description: 'Prepare and validate the deliverable but do not push to the target repo'
         required: false
         default: false
         type: boolean
-      git_author_name:
-        description: 'Git commit author name for CITnet commits'
+      commit_message:
+        description: 'Commit body appended after the subject line "delivery: <version>". Supports multi-line text. Use pipe (|) as line separator in workflow_dispatch UI. If empty, only the subject line is used.'
+        required: false
+        default: ''
+        type: string
+      commit_author_name:
+        description: 'Git author name for delivery commits on the target repo'
         required: false
         default: 'Meaningfy CI'
         type: string
-      git_author_email:
-        description: 'Git commit author email for CITnet commits'
+      commit_author_email:
+        description: 'Git author email for delivery commits on the target repo'
         required: false
         default: 'ci@meaningfy.ws'
-        type: string
-      commit_message:
-        description: 'Commit body appended after the subject line "delivery: <version>". Supports multi-line text for detailed descriptions. If empty, only the subject line is used.'
-        required: false
-        default: ''
         type: string
       create_tag:
         description: 'Create a git tag on the target repo using the VERSION value (e.g., 2.3.0-RC.5)'
         required: false
         default: false
         type: boolean
-      citnet_repo_url:
-        description: 'SSH URL of the CITnet Bitbucket repo (not required for dry_run)'
+      fortify_exclude_patterns:
+        description: 'Fortify security scan exclusion patterns (one per line, creates src/filters/fortify-exclusion.properties)'
+        required: false
+        default: ''
+        type: string
+      odc_exclude_patterns:
+        description: 'OWASP Dependency Check exclusion patterns (one per line, creates src/filters/odc-exclusion.properties)'
         required: false
         default: ''
         type: string
     secrets:
-      CITNET_DEPLOY_KEY:
-        description: 'SSH private key for pushing to CITnet (not required for dry_run)'
+      SSH_DEPLOY_KEY:
+        description: 'SSH private key for pushing to the target repo (not required for dry_run)'
         required: false
 
 jobs:
   deliver:
-    name: Deliver to CITnet
+    name: Deliver to target
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -93,7 +74,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ github.ref }}
           fetch-depth: 1
           path: source
 
@@ -101,10 +82,10 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION_PATH="source/${{ inputs.version_file }}"
+          VERSION_PATH="source/VERSION"
 
           if [ ! -f "$VERSION_PATH" ]; then
-            echo "::error::VERSION file not found at $VERSION_PATH"
+            echo "::error::VERSION file not found at repo root"
             exit 1
           fi
 
@@ -115,52 +96,27 @@ jobs:
       # ── 3. Prepare deliverable tree ──────────────────────────────────
       - name: Prepare deliverable tree
         run: |
-          SOURCE_DIR="source/${{ inputs.deliverable_path }}"
-
-          if [ ! -d "$SOURCE_DIR" ]; then
-            echo "::error::Deliverable path not found: $SOURCE_DIR"
-            exit 1
-          fi
-
           mkdir -p deliverable
 
           # Copy only the three mandatory directories
           for dir in src test docs; do
-            if [ -d "$SOURCE_DIR/$dir" ]; then
-              rsync -a "$SOURCE_DIR/$dir/" "deliverable/$dir/"
+            if [ -d "source/$dir" ]; then
+              rsync -a "source/$dir/" "deliverable/$dir/"
               echo "Copied: $dir/"
             else
               echo "::warning::Mandatory directory not found in source: $dir/"
             fi
           done
 
-          # Copy extra paths (one per line, files or directories)
-          EXTRA_PATHS_RAW="${{ inputs.include_extra_paths }}"
-          if [ -n "$EXTRA_PATHS_RAW" ]; then
-            echo "$EXTRA_PATHS_RAW" | sed '/^\s*$/d' | while read -r p; do
-              SRC="$SOURCE_DIR/$p"
-              if [ -d "$SRC" ]; then
-                rsync -a "$SRC/" "deliverable/$p/"
-                echo "Copied extra dir: $p/"
-              elif [ -f "$SRC" ]; then
-                mkdir -p "deliverable/$(dirname "$p")"
-                cp "$SRC" "deliverable/$p"
-                echo "Copied extra file: $p"
-              else
-                echo "::warning::Extra path not found: $p"
-              fi
-            done
-          fi
-
           # Ensure VERSION ends up at src/VERSION (OP requirement 5.2.3)
           mkdir -p deliverable/src
-          cp "source/${{ inputs.version_file }}" deliverable/src/VERSION
+          cp source/VERSION deliverable/src/VERSION
           echo "src/VERSION: $(cat deliverable/src/VERSION)"
 
           # Generate security exclusion files if patterns provided (OP requirement 5.2.4)
           # Inputs are newline-separated (one pattern per line), joined with commas for .properties format
-          FORTIFY_RAW="${{ inputs.fortify_exclusions }}"
-          ODC_RAW="${{ inputs.odc_exclusions }}"
+          FORTIFY_RAW="${{ inputs.fortify_exclude_patterns }}"
+          ODC_RAW="${{ inputs.odc_exclude_patterns }}"
 
           # Strip blank lines and join with commas
           FORTIFY=$(echo "$FORTIFY_RAW" | sed '/^\s*$/d' | paste -sd ',' -)
@@ -204,51 +160,52 @@ jobs:
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v7
         with:
-          name: op-deliverable-${{ inputs.project_name }}-${{ steps.version.outputs.version }}
+          name: op-deliverable-${{ github.event.repository.name }}-${{ steps.version.outputs.version }}
           path: deliverable/
           retention-days: 7
 
-      # ── 6. Set up SSH for CITnet ─────────────────────────────────────
+      # ── 6. Set up SSH ────────────────────────────────────────────────
       - name: Set up SSH
         if: ${{ !inputs.dry_run }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.CITNET_DEPLOY_KEY }}" > ~/.ssh/citnet_key
-          chmod 600 ~/.ssh/citnet_key
+          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
 
-          CITNET_URL="${{ inputs.citnet_repo_url }}"
-          CITNET_HOST=$(echo "$CITNET_URL" | sed -n 's|.*[/@]\([^:/]*\).*|\1|p')
-          CITNET_PORT=$(echo "$CITNET_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+          TARGET_URL="${{ inputs.target_repo_url }}"
+          TARGET_HOST=$(echo "$TARGET_URL" | sed -n 's|.*[/@]\([^:/]*\).*|\1|p')
+          TARGET_PORT=$(echo "$TARGET_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
 
-          if [ -n "$CITNET_PORT" ] && [ "$CITNET_PORT" != "443" ]; then
-            ssh-keyscan -p "$CITNET_PORT" "$CITNET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          if [ -n "$TARGET_PORT" ] && [ "$TARGET_PORT" != "443" ]; then
+            ssh-keyscan -p "$TARGET_PORT" "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           else
-            ssh-keyscan "$CITNET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+            ssh-keyscan "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
 
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/citnet_key -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
 
-      # ── 7. Clone CITnet develop branch ───────────────────────────────
-      - name: Clone CITnet repo
+      # ── 7. Clone target branch ───────────────────────────────────────
+      - name: Clone target repo
         if: ${{ !inputs.dry_run }}
         run: |
-          CITNET_URL="${{ inputs.citnet_repo_url }}"
+          TARGET_URL="${{ inputs.target_repo_url }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
 
-          git clone --depth 1 --branch develop "$CITNET_URL" citnet
+          git clone --depth 1 --branch "$TARGET_BRANCH" "$TARGET_URL" target
 
-          cd citnet
-          git config user.name "${{ inputs.git_author_name }}"
-          git config user.email "${{ inputs.git_author_email }}"
+          cd target
+          git config user.name "${{ inputs.commit_author_name }}"
+          git config user.email "${{ inputs.commit_author_email }}"
 
-      # ── 8. Sync deliverable and push to develop ──────────────────────
+      # ── 8. Sync deliverable and push ─────────────────────────────────
       - name: Sync and push
         if: ${{ !inputs.dry_run }}
         run: |
           rsync -a --delete \
             --exclude '.git' \
-            deliverable/ citnet/
+            deliverable/ target/
 
-          cd citnet
+          cd target
 
           if git diff --quiet HEAD 2>/dev/null && \
              git diff --cached --quiet 2>/dev/null && \
@@ -271,16 +228,18 @@ jobs:
             echo "$CUSTOM_MSG" | sed 's/ *| */\n/g' >> "$MSGFILE"
           fi
 
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+
           git add -A
           git commit -F "$MSGFILE"
           rm -f "$MSGFILE"
-          git push origin develop
+          git push origin "$TARGET_BRANCH"
 
       # ── 9. Tag the delivery (optional) ────────────────────────────
       - name: Create tag
         if: ${{ !inputs.dry_run && inputs.create_tag }}
         run: |
-          cd citnet
+          cd target
           VERSION="${{ steps.version.outputs.version }}"
 
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
@@ -299,8 +258,9 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Project | \`${{ inputs.project_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Source ref | \`${{ inputs.source_ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Project | \`${{ github.event.repository.name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Source ref | \`${{ github.ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target branch | \`${{ inputs.target_branch }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Dry run | \`${{ inputs.dry_run }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag created | \`${{ !inputs.dry_run && inputs.create_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"

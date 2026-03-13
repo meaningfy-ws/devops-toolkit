@@ -256,12 +256,14 @@ jobs:
           CUSTOM_MSG="${{ inputs.commit_message }}"
 
           # Build commit message file to support multi-line body
+          # Pipe characters (|) are expanded to newlines so workflow_dispatch
+          # UI users can enter "line1 | line2 | line3" in a single text box.
           MSGFILE=$(mktemp)
           echo "delivery: $VERSION" > "$MSGFILE"
 
           if [ -n "$CUSTOM_MSG" ]; then
             echo "" >> "$MSGFILE"
-            echo "$CUSTOM_MSG" >> "$MSGFILE"
+            echo "$CUSTOM_MSG" | sed 's/ *| */\n/g' >> "$MSGFILE"
           fi
 
           git add -A

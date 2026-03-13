@@ -113,7 +113,9 @@ Once verified:
 
 ### Commit message
 
-The CITnet commit subject is always `delivery: <version>`. If you provide `commit_message`, it becomes the commit body (separated by a blank line), supporting multi-line descriptions:
+The CITnet commit subject is always `delivery: <version>`. If you provide `commit_message`, it becomes the commit body (separated by a blank line).
+
+**From YAML** (hardcoded in caller) — use block scalar for multi-line:
 
 ```yaml
 commit_message: |
@@ -122,7 +124,13 @@ commit_message: |
   - Added new mapping suite processor
 ```
 
-This produces a git commit like:
+**From workflow_dispatch UI** — use pipe (`|`) as a line separator:
+
+```
+Fixed airflow Dockerfile | Updated DAG config | Added processor
+```
+
+Both produce the same git commit:
 
 ```
 delivery: 2.3.0-RC.5
@@ -204,6 +212,10 @@ on:
         required: false
         type: boolean
         default: false
+      commit_message:
+        description: 'Delivery description (use | to separate lines)'
+        required: false
+        default: ''
 
 jobs:
   deliver:
@@ -212,6 +224,7 @@ jobs:
       project_name: ted-rdf-conversion-pipeline
       source_ref: ${{ github.event.inputs.source_ref }}
       dry_run: ${{ github.event.inputs.dry_run == 'true' }}
+      commit_message: ${{ github.event.inputs.commit_message }}
       citnet_repo_url: ssh://git@citnet-bitbucket.example.com:7999/project/repo.git
       include_extra_paths: |
         requirements.txt

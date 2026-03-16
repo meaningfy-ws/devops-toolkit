@@ -1,6 +1,6 @@
 # OP Delivery Workflow
 
-Reusable GitHub Actions workflow that delivers source code to a target Git repository via SSH.
+Reusable GitHub Actions workflow that delivers source code to a target Git repository via HTTPS.
 
 ## How It Works
 
@@ -31,15 +31,12 @@ VERSION ───(copy)──────────>  src/VERSION             
 
 ## Setup
 
-### 1. SSH deploy key
+### 1. HTTPS access token
 
-```bash
-ssh-keygen -t ed25519 -C "op-delivery-<project>" -f deploy-key -N ""
-```
+Create an HTTP access token on the target repository host (e.g., Bitbucket Server → HTTP access tokens) with **write** permission.
 
-- **Public key** → deploy key (write access) on the target repo
-- **Private key** → GitHub Actions secret on the calling repo
-- Map it to `SSH_DEPLOY_KEY` in the caller's `secrets:` block
+- Store the token as a GitHub Actions secret on the calling repo
+- Map it to `TARGET_REPO_TOKEN` in the caller's `secrets:` block
 
 ### 2. Create caller workflow
 
@@ -49,13 +46,13 @@ Add `.github/workflows/op-deliver.yml` to your project (see [example](#caller-wo
 
 1. Set `dry_run: true`, push, inspect the uploaded artifact
 2. Point at a throwaway test repo, set `dry_run: false`, verify the push
-3. Switch to the real target URL and deploy key
+3. Switch to the real target URL and token
 
 ## Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `target_repo_url` | No | `''` | SSH URL of the target repo. Not required for dry runs. |
+| `target_repo_url` | No | `''` | HTTPS URL of the target repo. Not required for dry runs. |
 | `target_branch` | No | `develop` | Branch to push to |
 | `dry_run` | No | `false` | Upload artifact instead of pushing |
 | `commit_message` | No | `''` | Commit body after `delivery: <version>`. Use `\|` as line separator in dispatch UI. |
@@ -65,7 +62,7 @@ Add `.github/workflows/op-deliver.yml` to your project (see [example](#caller-wo
 | `fortify_exclude_patterns` | No | `''` | Fortify exclusion patterns (one per line) |
 | `odc_exclude_patterns` | No | `''` | ODC exclusion patterns (one per line) |
 
-**Secret:** `SSH_DEPLOY_KEY` -- SSH private key for the target repo. Not needed for dry runs.
+**Secret:** `TARGET_REPO_TOKEN` -- HTTPS Bearer token for the target repo. Not needed for dry runs.
 
 Exclusion patterns are joined with commas in the generated `.properties` files:
 ```
@@ -81,8 +78,8 @@ on:
   workflow_dispatch:
     inputs:
       target_repo_url:
-        description: 'SSH URL of the target repository'
-        default: 'git@bitbucket.org:your-org/your-repo.git'
+        description: 'HTTPS URL of the target repository'
+        default: 'https://bitbucket.example.com/scm/project/repo.git'
         type: string
       target_branch:
         description: 'Branch to push to on the target repository'
@@ -110,7 +107,7 @@ jobs:
   deliver:
     uses: meaningfy-ws/devops-toolkit/.github/workflows/op-delivery.yml@main
     with:
-      target_repo_url: ${{ inputs.target_repo_url || 'git@bitbucket.org:your-org/your-repo.git' }}
+      target_repo_url: ${{ inputs.target_repo_url || 'https://bitbucket.example.com/scm/project/repo.git' }}
       target_branch: ${{ inputs.target_branch || 'develop' }}
       dry_run: ${{ inputs.dry_run || false }}
       create_tag: ${{ inputs.create_tag != '' && inputs.create_tag || true }}
@@ -124,7 +121,7 @@ jobs:
         **/docs/**/*
         **/test/**/*
     secrets:
-      SSH_DEPLOY_KEY: ${{ secrets.MY_DEPLOY_KEY }}
+      TARGET_REPO_TOKEN: ${{ secrets.MY_TARGET_REPO_TOKEN }}
 ```
 
 The `||` fallbacks provide defaults when triggered via `push` (testing). `workflow_dispatch` only works on the repo's **default branch**.
@@ -161,5 +158,5 @@ The workflow copies files as-is. Before delivery, ensure:
 | Problem | Solution |
 |---------|----------|
 | "Run workflow" button not visible | Merge the caller workflow to the default branch first |
-| SSH permission denied | Verify deploy key has write access and secret contains the private key |
+| HTTPS 401/403 | Verify token has write access and the secret is set correctly on the calling repo |
 | "No changes to deliver" | Deliverable is identical to target -- normal on re-runs |

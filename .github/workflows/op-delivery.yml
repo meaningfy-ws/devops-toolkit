@@ -1,4 +1,4 @@
-# Deliver src/, test/, docs/ to a target Git repo via SSH.
+# Deliver src/, test/, docs/ to a target Git repo via HTTPS.
 # See docs/op-delivery.md for full reference.
 
 name: OP Delivery
@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       target_repo_url:
-        description: 'SSH URL of the target repository (e.g., git@bitbucket.org:project/repo.git). Not required for dry_run.'
+        description: 'HTTPS URL of the target repository (e.g., https://bitbucket.example.com/scm/project/repo.git). Not required for dry_run.'
         required: false
         default: ''
         type: string
@@ -50,8 +50,8 @@ on:
         default: ''
         type: string
     secrets:
-      SSH_DEPLOY_KEY:
-        description: 'SSH private key for pushing to the target repo (not required for dry_run)'
+      TARGET_REPO_TOKEN:
+        description: 'HTTPS Bearer token (e.g., Bitbucket HTTP access token) for pushing to the target repo. Not required for dry_run.'
         required: false
 
 jobs:
@@ -156,19 +156,14 @@ jobs:
           path: deliverable/
           retention-days: 7
 
-      # ### SSH setup
-      # Install deploy key and scan target host.
-      - name: Set up SSH
+      # ### HTTPS auth
+      # Configure git to send a Bearer token header for all HTTPS operations.
+      - name: Set up HTTPS auth
         if: ${{ !inputs.dry_run }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          TARGET_HOST=$(echo "${{ inputs.target_repo_url }}" | sed -n 's|.*[/@]\([^:/]*\).*|\1|p')
-          ssh-keyscan "$TARGET_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_COUNT=1" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_KEY_0=http.extraHeader" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=Authorization: Bearer ${{ secrets.TARGET_REPO_TOKEN }}" >> "$GITHUB_ENV"
 
       # ### Clone target
       # Shallow-clone the target branch and configure git author.

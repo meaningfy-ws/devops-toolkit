@@ -8,37 +8,119 @@ an older kernel is the workaround.
 
 ## Prerequisites
 
-- **QEMU/KVM** — `qemu-system-x86_64` and `qemu-img`
-- **`genisoimage`** — `sudo apt install genisoimage` (Ubuntu/Debian). On macOS: `brew install cdrtools` and use `mkisofs`
-- **Running X server** — the WorkSpaces client window renders locally via X11 forwarding. On Linux: Xorg or Wayland with XWayland. On macOS: XQuartz. On WSL: an X server like VcXsrv
-- **SSH key pair** — see [SSH setup](#ssh-setup) below
+Install these before you start:
 
-### SSH setup
-
-`run.sh` connects to the VM via SSH X11 forwarding on `localhost:2222`. It
-relies on your SSH agent having the private key that matches the public key
-in `vm/user-data`:
-
-1. Edit `vm/user-data` and replace the `ssh_authorized_keys` entry with **your own** public key
-2. Make sure your SSH agent has the corresponding private key loaded (`ssh-add -l`)
-3. If you don't use an agent, add `-i ~/.ssh/your_key` to the `SSH_OPTS` at the top of `run.sh` (or change to password auth — edit `user-data` to set `lock_passwd: true` and add `chpasswd` to `runcmd`)
+- **QEMU/KVM** — `sudo apt install qemu-system-x86 qemu-utils` (Ubuntu/Debian)
+- **`genisoimage`** — `sudo apt install genisoimage` (Ubuntu/Debian)
+- **A running X server** — the WorkSpaces client window appears on your desktop. On Linux this is already running if you have a graphical desktop (Xorg or Wayland+XWayland). On macOS install [XQuartz](https://www.xquartz.org/). On WSL install [VcXsrv](https://sourceforge.net/projects/vcxsrv/)
 
 ## Setup (first time only)
 
+Follow these steps **in order**. Each step is done once. After that you only
+need `./run.sh` and `./run.sh stop` for daily use.
+
+### Step 1: Create an SSH key pair (if you don't have one)
+
+The VM is accessed over SSH. You need a key pair — a **private key** (stays
+on your machine) and a **public key** (goes into the VM).
+
+Check if you already have one:
+
 ```bash
-# 1. Download the Ubuntu 20.04 cloud image (~618 MB)
-#    Pick the right image for your architecture:
-#    https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
-wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img -O vm/focal-server-cloudimg-amd64.img
+ls ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub 2>/dev/null
+```
 
-# 2. Edit vm/user-data and replace the SSH authorized key with yours
+If you see a filename printed, skip to Step 2. If nothing prints, generate one:
 
-# 3. Create the VM disk (qcow2 overlay) and seed ISO
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_workspaces -N ""
+```
+
+This creates two files:
+- `~/.ssh/id_ed25519_workspaces` — your private key (keep this secret, never share it)
+- `~/.ssh/id_ed25519_workspaces.pub` — your public key (this goes into the VM)
+
+### Step 2: Download the Ubuntu 20.04 cloud image
+
+```bash
+cd tools/workspaces-pcoip
+wget -O vm/focal-server-cloudimg-amd64.img \
+  https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+```
+
+This downloads the base operating system image (~618 MB). You only do this
+once — the VM runs as a lightweight overlay on top of it.
+
+### Step 3: Add your public key to the VM config
+
+The file `vm/user-data` is a cloud‑init configuration that tells the VM what
+to install and which SSH keys to accept. Open it in a text editor:
+
+```bash
+nano vm/user-data  # or: gedit vm/user-data
+```
+
+Find these lines inside the file:
+
+```yaml
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHVS6eyfRkyLyNa8v68t3nE8jJkU46vuWPTl7KYhvoAE
+```
+
+Print your public key so you can copy it:
+
+```bash
+cat ~/.ssh/id_ed25519_workspaces.pub
+```
+
+Replace the entire `ssh-ed25519 AAAAC3…` line with the output from `cat`.
+The final result should look like this (but with **your** key):
+
+```yaml
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3N…your-key-here… comment
+```
+
+> ⚠️ The leading spaces and the `- ` are important. Keep them exactly as they
+> were — only replace the key text. Save and close the file.
+
+### Step 4: Make sure your SSH agent has the key
+
+The `run.sh` script connects via SSH using your SSH agent:
+
+```bash
+ssh-add ~/.ssh/id_ed25519_workspaces
+```
+
+Verify the key is loaded:
+
+```bash
+ssh-add -l
+```
+
+You should see your key listed. If you get "Could not open a connection to
+your authentication agent", start the agent first:
+
+```bash
+eval $(ssh-agent) && ssh-add ~/.ssh/id_ed25519_workspaces
+```
+
+### Step 5: Create the VM disk and seed ISO
+
+```bash
 cd vm/
 qemu-img create -b focal-server-cloudimg-amd64.img -f qcow2 -F qcow2 workspaces-vm.qcow2
 genisoimage -output seed.iso -volid cidata -joliet -rock user-data meta-data
 cd ..
 ```
+
+What these do:
+- `qemu-img create` makes a lightweight copy-on-write disk (~a few MB) that
+  references the base image you downloaded. Any changes the VM makes are saved
+  into this overlay, leaving the base image untouched.
+- `genisoimage` bundles `user-data` and `meta-data` into an ISO that cloud‑init
+  reads on first boot. This is how the VM knows to install the WorkSpaces
+  client and accept your SSH key.
 
 ## Quick start
 
@@ -50,16 +132,21 @@ cd ..
 ./run.sh stop
 ```
 
+- `./run.sh` boots the VM (first time: cloud‑init installs the WorkSpaces
+  client — this takes ~2 minutes). Once the VM is ready, the WorkSpaces
+  client window appears on your desktop automatically.
+- `./run.sh stop` gracefully shuts down the VM.
+
 ## How it works
 
-`run.sh` uses QEMU/KVM to boot a headless Ubuntu 20.04 VM with cloud-init.
-cloud-init provisions the WorkSpaces client on first boot (`vm/user-data`).
+`run.sh` uses QEMU/KVM to boot a headless Ubuntu 20.04 VM with cloud‑init.
+cloud‑init provisions the WorkSpaces client on first boot (`vm/user-data`).
 
 | File | Role |
 |------|------|
-| `run.sh` | Start VM, wait for cloud-init, launch client via SSH X11 forwarding |
-| `vm/user-data` | cloud-init config: packages, WorkSpaces client install, SSH setup |
-| `vm/meta-data` | cloud-init VM identity |
+| `run.sh` | Start VM, wait for cloud‑init, launch client via SSH X11 forwarding |
+| `vm/user-data` | cloud‑init config: packages, WorkSpaces client install, SSH setup |
+| `vm/meta-data` | cloud‑init VM identity |
 | `vm/start-vm.sh` | Start VM only (no client launch) |
 | `vm/stop-vm.sh` | Graceful VM shutdown |
 
@@ -76,6 +163,6 @@ forwarding through SSH on `localhost:2222`.
 ## VM artifacts (generated, not tracked)
 
 - `vm/workspaces-vm.qcow2` — VM disk (overlay on `focal-server-cloudimg-amd64.img`)
-- `vm/seed.iso` — cloud-init seed ISO
+- `vm/seed.iso` — cloud‑init seed ISO
 - `vm/vm.pid` — QEMU PID file
 - `vm/focal-server-cloudimg-amd64.img` — base Ubuntu 20.04 cloud image (~618 MB)

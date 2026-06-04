@@ -137,6 +137,31 @@ What these do:
   client window appears on your desktop automatically.
 - `./run.sh stop` gracefully shuts down the VM.
 
+### Resource usage — please stop when done
+
+While running, the VM reserves **2 CPU cores and 2 GB of RAM** from your
+host machine (these are set in `run.sh`: `-smp 2 -m 2048`). On a laptop this
+can cause the fan to spin up, drain the battery faster, and make other apps
+sluggish.
+
+The VM does **not** save battery or reduce CPU usage when the WorkSpaces
+client is idle — QEMU runs at full allocation regardless of what happens
+inside the VM.
+
+**Always run `./run.sh stop` when you're done.** If you close the WorkSpaces
+client window but don't stop the VM, the VM keeps running in the background
+consuming those resources until you shut down your computer or kill it
+manually. There is no automatic shutdown — it's a bare QEMU process with no
+idle detection.
+
+To check if the VM is still running:
+
+```bash
+pgrep -f workspaces-vm.qcow2
+```
+
+If it prints a number, the VM is still running — stop it with `./run.sh stop`.
+
 ## How it works
 
 `run.sh` uses QEMU/KVM to boot a headless Ubuntu 20.04 VM with cloud‑init.

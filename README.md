@@ -1,6 +1,16 @@
 # devops-toolkit
 
-Reusable GitHub Actions workflows for Meaningfy projects.
+Reusable GitHub Actions workflows and developer tools for Meaningfy projects.
+
+## Tools
+
+### WorkSpaces PCoIP Client (`tools/workspaces-pcoip/`)
+
+Runs the Amazon WorkSpaces PCoIP client via a headless QEMU/KVM VM with X11
+forwarding. Needed because the native Ubuntu 22/24 client only supports DCV,
+and the Ubuntu 20.04 PCoIP client crashes on kernel 6.17+.
+
+See [tools/workspaces-pcoip/README.md](tools/workspaces-pcoip/README.md) for setup and usage.
 
 ## Workflows
 

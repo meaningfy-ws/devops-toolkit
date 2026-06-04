@@ -1,0 +1,56 @@
+#cloud-config
+hostname: workspaces-vm
+users:
+  - name: ws
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: ws
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHVS6eyfRkyLyNa8v68t3nE8jJkU46vuWPTl7KYhvoAE
+
+package_update: true
+packages:
+  - xauth
+  - libgtk-3-0
+  - libx11-xcb1
+  - libxkbcommon-x11-0
+  - libxcb-xinerama0
+  - libxcb-randr0
+  - libxcb-render0
+  - libxcb-shape0
+  - libxcb-shm0
+  - libxcb-sync1
+  - libxcb-xfixes0
+  - libxcb-icccm4
+  - libxcb-image0
+  - libxcb-keysyms1
+  - libxcb-render-util0
+  - libxcb-xkb1
+  - libxcomposite1
+  - libxdamage1
+  - libxrandr2
+  - libxtst6
+  - libasound2
+  - libpulse0
+  - libgl1-mesa-glx
+  - libnss3
+  - libatk-bridge2.0-0
+  - libdrm2
+  - libgbm1
+  - dbus-x11
+  - libdbus-1-3
+  - libpcsclite1
+  - libusb-1.0-0
+  - openssh-server
+
+runcmd:
+  - sed -i 's/#X11Forwarding.*/X11Forwarding yes/' /etc/ssh/sshd_config
+  - sed -i 's/#X11UseLocalhost.*/X11UseLocalhost no/' /etc/ssh/sshd_config
+  - systemctl restart sshd
+  - wget -q -O - https://workspaces-client-linux-public-key.s3-us-west-2.amazonaws.com/ADB332E7.asc | tee /etc/apt/trusted.gpg.d/amazon-workspaces-clients.asc > /dev/null
+  - echo "deb [arch=amd64] https://d3nt0h4h6pmmc4.cloudfront.net/ubuntu focal main" | tee /etc/apt/sources.list.d/amazon-workspaces-clients.list
+  - apt-get update
+  - apt-get install -y workspacesclient
+  - echo "WorkSpaces client installed successfully" > /home/ws/READY
+  - chown ws:ws /home/ws/READY

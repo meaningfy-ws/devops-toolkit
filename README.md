@@ -21,10 +21,10 @@ Delivers source code from a Meaningfy GitHub repo to a target Git repository (ty
 **What it does:**
 
 1. Checks out the source repo at the triggering ref
-2. Assembles a deliverable tree (`src/`, `test/`, `docs/`)
+2. Assembles a deliverable tree (`src/`, `test/`, `docs/`, including nested directories such as `src/plugins/`)
 3. Places `VERSION` at `src/VERSION` and generates security exclusion files
 4. Validates the OP-mandatory directory structure
-5. Either uploads an artifact for inspection (dry run) or pushes to the target branch via SSH
+5. Either uploads an artifact for inspection (dry run) or pushes to the target branch via HTTPS using a Bearer token
 6. Optionally tags the delivery on the target repo
 
 **Quick start** -- add this to your project's `.github/workflows/op-deliver.yml`:
@@ -39,12 +39,12 @@ jobs:
   deliver:
     uses: meaningfy-ws/devops-toolkit/.github/workflows/op-delivery.yml@main
     with:
-      target_repo_url: git@bitbucket.org:your-org/your-repo.git
+      target_repo_url: https://bitbucket.example.com/scm/your-org/your-repo.git
       commit_author_name: Your Name
       commit_author_email: plumber@meaningfy.ws
       dry_run: true
     secrets:
-      SSH_DEPLOY_KEY: ${{ secrets.MY_DEPLOY_KEY }}
+      TARGET_REPO_TOKEN: ${{ secrets.MY_TARGET_REPO_TOKEN }}
 ```
 
 See [docs/op-delivery.md](docs/op-delivery.md) for the full reference.

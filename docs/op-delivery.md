@@ -144,6 +144,55 @@ test/
 
 `rsync --delete` removes anything on the target not in the deliverable.
 
+## Rehearse a Delivery Locally
+
+Use this procedure when target-repository push access is unavailable but a
+local checkout of the matching target branch is available. It applies the
+dry-run artifact with the same `rsync` semantics as a real delivery.
+
+1. Run the caller workflow with `dry_run: true`. Select the source release
+  branch and set `target_branch` to the matching target release branch.
+2. Download the `op-deliverable-<project>-<version>` artifact from the
+  successful workflow run. Artifacts are retained for seven days.
+3. Update the local target checkout to the matching branch:
+
+  ```bash
+  cd /path/to/target-repo
+  git switch release/your-release-branch
+  git pull --ff-only origin release/your-release-branch
+  ```
+
+4. Extract the artifact outside the target checkout, then apply it:
+
+  ```bash
+  ARTIFACT_DIR=$(mktemp -d)
+
+  unzip -o ~/Downloads/op-deliverable-<project>-<version>.zip \
+    -d "$ARTIFACT_DIR"
+
+  test -d "$ARTIFACT_DIR/src" && \
+  test -d "$ARTIFACT_DIR/test" && \
+  test -d "$ARTIFACT_DIR/docs"
+
+  rsync -a --delete --exclude '.git' \
+    "$ARTIFACT_DIR/" ./
+
+  rm -rf "$ARTIFACT_DIR"
+  ```
+
+5. Inspect the local delivery state:
+
+  ```bash
+  git status --short
+  git diff --stat
+  git diff --name-status
+  ```
+
+The `rsync --delete` command overwrites delivered files and deletes files at
+the target root that are absent from the artifact, while preserving `.git`.
+Git shows changes to tracked files; untracked or ignored files removed by the
+command cannot be recovered through Git.
+
 ## Developer Responsibilities
 
 The workflow copies files as-is. Before delivery, ensure:

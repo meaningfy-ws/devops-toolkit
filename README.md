@@ -16,7 +16,7 @@ See [tools/workspaces-pcoip/README.md](tools/workspaces-pcoip/README.md) for set
 
 ### OP Delivery (`op-delivery.yml`)
 
-Delivers source code from a Meaningfy GitHub repo to a target Git repository (typically the OP CITnet Bitbucket). Designed to be called from any Meaningfy project that participates in the OP CI/CD pipeline.
+Delivers source code from a Meaningfy GitHub repo to a target Git repository (typically the OP CITnet Bitbucket). Designed to be called from any Meaningfy project that participates in the OP CI/CD pipeline. See the [OP delivery runbook](docs/op-delivery.md), including how to rehearse a delivery locally from a dry-run artifact.
 
 **What it does:**
 
